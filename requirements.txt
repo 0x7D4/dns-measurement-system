@@ -1,0 +1,6 @@
+dnspython
+psycopg2-binary
+ipwhois
+pytz
+python-dotenv
+requests

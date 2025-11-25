@@ -1,0 +1,40 @@
+[Unit]
+Description=DNS Server Analyzer - Analyzes 1624 DNS servers
+After=network-online.target postgresql.service
+Wants=network-online.target
+Documentation=https://github.com/your-repo/dns-analyzer
+
+[Service]
+Type=oneshot
+User=your-username
+Group=your-username
+WorkingDirectory=/home/your-username/dns-analyzer
+
+# Python virtual environment path
+Environment="PATH=/home/your-username/dns-analyzer/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Load database credentials from .env file
+EnvironmentFile=/home/your-username/dns-analyzer/.env
+
+# Execute the analyzer (single run, no loop)
+ExecStart=/home/your-username/dns-analyzer/venv/bin/python3 main.py --input in.json --delay 0.1
+
+# Restart on failure (but not on success since Type=oneshot)
+Restart=on-failure
+RestartSec=5min
+
+# Resource limits
+TimeoutStartSec=0
+TimeoutStopSec=30s
+
+# Logging configuration
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dns-analyzer
+
+# Security hardening (optional but recommended)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
