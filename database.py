@@ -30,6 +30,7 @@ class PostgreSQLDatabase:
             CREATE TABLE IF NOT EXISTS dns_query_logs (
                 id SERIAL PRIMARY KEY,
                 server_ip INET NOT NULL,
+                system_hostname VARCHAR(255),
                 query_type VARCHAR(10) NOT NULL,
                 query_name VARCHAR(255) NOT NULL,
                 query_flags TEXT,
@@ -53,6 +54,8 @@ class PostgreSQLDatabase:
                 ON dns_query_logs(test_type);
             CREATE INDEX IF NOT EXISTS idx_dns_logs_ttl
                 ON dns_query_logs(response_ttl);
+            CREATE INDEX IF NOT EXISTS idx_dns_logs_hostname
+                ON dns_query_logs(system_hostname);
             """,
             """
             CREATE TABLE IF NOT EXISTS whois_cache (
@@ -139,6 +142,20 @@ class PostgreSQLDatabase:
             CREATE INDEX IF NOT EXISTS idx_hosts_public_ip
                 ON measurement_hosts(public_ip);
             """,
+            # MIGRATION: Ensure system_hostname exists in dns_query_logs
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'dns_query_logs'
+                    AND column_name = 'system_hostname'
+                ) THEN
+                    ALTER TABLE dns_query_logs ADD COLUMN system_hostname VARCHAR(255);
+                END IF;
+            END $$;
+            """
         ]
 
         try:
@@ -298,6 +315,7 @@ class PostgreSQLDatabase:
         query = """
         INSERT INTO dns_query_logs (
             server_ip,
+            system_hostname,
             query_type,
             query_name,
             query_flags,
@@ -316,6 +334,7 @@ class PostgreSQLDatabase:
         values = [
             (
                 log.server_ip,
+                log.system_hostname,
                 log.query_type,
                 log.query_name,
                 log.query_flags,
