@@ -4,3 +4,5 @@ ipwhois
 pytz
 python-dotenv
 requests
+fastapi
+uvicorn

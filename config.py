@@ -21,7 +21,7 @@ TRACEROUTE_TEST_DOMAIN = "ietf.org"     # used by traceroute test
 CACHE_TTL_TEST_DOMAIN = "isc.org"       # used by DNS cache TTL/invalidation test
 
 # Input and scheduling
-INPUT_FILE = "in.json"
+INPUT_FILE = "test.json"
 LOOP_INTERVAL = 3600  # 1 hour
 DEFAULT_DELAY = 0.1
 DEFAULT_BATCH_SIZE = 100
