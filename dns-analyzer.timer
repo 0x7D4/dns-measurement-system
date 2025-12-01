@@ -3,19 +3,10 @@ Description=DNS Analyzer Timer - Runs continuously with 1s delay
 Requires=dns-analyzer.service
 
 [Timer]
-# First run: 2 minutes after system boot
 OnBootSec=2min
-
-# Subsequent runs: 1 second AFTER service completes
 OnUnitActiveSec=1s
-
-# Store last activation time on disk (survives reboots)
 Persistent=true
-
-# No randomization for continuous runs
 AccuracySec=1ms
-
-# Specify which service to activate
 Unit=dns-analyzer.service
 
 [Install]

@@ -8,19 +8,13 @@ Type=oneshot
 User=root
 Group=root
 WorkingDirectory=/root/dns-analyzer
-
-# Use run.sh which handles everything (venv, dependencies, execution)
 ExecStart=/bin/bash /root/dns-analyzer/run.sh
-
-# Restart on failure (but not on success since Type=oneshot)
-Restart=on-failure
-RestartSec=5min
 
 # Resource limits
 TimeoutStartSec=0
 TimeoutStopSec=60s
 
-# Logging configuration
+# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=dns-analyzer
