@@ -1,7 +1,6 @@
 [Unit]
 Description=DNS Analyzer Timer - Runs continuously with 1s delay
 Requires=dns-analyzer.service
-Documentation=
 
 [Timer]
 # First run: 2 minutes after system boot

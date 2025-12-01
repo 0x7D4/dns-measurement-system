@@ -2,7 +2,6 @@
 Description=DNS Server Analyzer - Distributed DNS Measurement
 After=network-online.target postgresql.service
 Wants=network-online.target
-Documentation=
 
 [Service]
 Type=oneshot
@@ -26,7 +25,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=dns-analyzer
 
-# No security hardening when running as root
+# Security
 PrivateTmp=true
 
 [Install]
