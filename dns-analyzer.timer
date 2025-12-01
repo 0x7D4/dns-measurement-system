@@ -1,21 +1,20 @@
 [Unit]
-Description=DNS Analyzer Timer - Runs every hour after completion
+Description=DNS Analyzer Timer - Runs continuously with 1s delay
 Requires=dns-analyzer.service
-Documentation=https://github.com/your-repo/dns-analyzer
+Documentation=
 
 [Timer]
-# First run: 5 minutes after system boot
-OnBootSec=5min
+# First run: 2 minutes after system boot
+OnBootSec=2min
 
-# Subsequent runs: 1 hour AFTER service completes
-OnUnitActiveSec=1h
+# Subsequent runs: 1 second AFTER service completes
+OnUnitActiveSec=1s
 
 # Store last activation time on disk (survives reboots)
 Persistent=true
 
-# Allow ±1 minute randomization to prevent thundering herd
-# (useful if you run this on multiple servers)
-AccuracySec=1min
+# No randomization for continuous runs
+AccuracySec=1ms
 
 # Specify which service to activate
 Unit=dns-analyzer.service

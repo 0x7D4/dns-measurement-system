@@ -1,123 +1,143 @@
 #!/usr/bin/env bash
-# run.sh
-# Clone and run DNS Measurement System once, using shared PostgreSQL DB.
-# DB credentials are read ONLY from a local .env file next to this script.
+#
+# run.sh - DNS Server Analyzer Runner
+# Runs a single analysis cycle, called by systemd timer
+#
 
 set -euo pipefail
 
-REPO_URL="https://github.com/0x7D4/dns-measurement-system.git"
-REPO_DIR="dns-measurement-system"
-VENV_DIR="venv"
+# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${SCRIPT_DIR}/venv"
+INPUT_FILE="${SCRIPT_DIR}/in.json"
+DELAY=0  # Delay between servers (0 for fastest)
 
 # -----------------------------------------------------------------------------
-# 1. OS-specific prerequisites (DietPi / Debian / Raspberry Pi)
+# 1. Check prerequisites (DietPi / Debian)
 # -----------------------------------------------------------------------------
-echo "[*] Detecting OS..."
-OS_NAME="$(uname -s || echo unknown)"
 
-if [[ "$OS_NAME" == "Linux" ]]; then
-    echo "[*] Checking for prerequisites (python3-venv, libpq-dev, traceroute)..."
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS Analyzer - Starting"
 
-    # python3-venv
+if [[ "$(uname -s)" == "Linux" ]]; then
+    # Check for required packages
+    MISSING_PKGS=()
+    
     if ! dpkg -s python3-venv >/dev/null 2>&1; then
-        echo " Package python3-venv not installed."
-        echo " Trying: sudo apt-get install -y python3-venv"
-        sudo apt-get install -y python3-venv || {
-            echo " WARNING: Failed to install python3-venv. Virtualenv creation may fail."
-        }
+        MISSING_PKGS+=("python3-venv")
     fi
-
-    # libpq-dev (Required for psycopg2)
+    
     if ! dpkg -s libpq-dev >/dev/null 2>&1; then
-        echo " Package libpq-dev not installed (required for psycopg2)."
-        echo " Trying: sudo apt-get install -y libpq-dev"
-        sudo apt-get install -y libpq-dev || {
-            echo " WARNING: Failed to install libpq-dev. Python dependency installation may fail."
-        }
+        MISSING_PKGS+=("libpq-dev")
     fi
-
-    # traceroute
+    
     if ! command -v traceroute >/dev/null 2>&1; then
-        echo " 'traceroute' not found."
-        echo " Trying: sudo apt-get install -y traceroute"
-        sudo apt-get install -y traceroute || {
-            echo " WARNING: Failed to install traceroute. Traceroute tests will be skipped or fail."
-        }
+        MISSING_PKGS+=("traceroute")
     fi
-
-else
-    echo "[*] Non-Linux OS detected (${OS_NAME})."
-    echo "    On Windows, 'tracert' is built-in and no package install is needed."
+    
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+        echo "[*] Installing missing packages: ${MISSING_PKGS[*]}"
+        apt-get update -qq
+        apt-get install -y "${MISSING_PKGS[@]}"
+    fi
 fi
 
 # -----------------------------------------------------------------------------
-# 2. Clone repo
+# 2. Load environment from .env
 # -----------------------------------------------------------------------------
-echo "[*] Cloning repository..."
-if [ -d "$REPO_DIR" ]; then
-    echo "    Repo directory '$REPO_DIR' already exists, skipping git clone."
-else
-    git clone "$REPO_URL"
-fi
 
-# -----------------------------------------------------------------------------
-# 3. Load DB credentials from .env (now required to proceed)
-# -----------------------------------------------------------------------------
 if [ -f "${SCRIPT_DIR}/.env" ]; then
-    echo "[*] Loading DB credentials from ${SCRIPT_DIR}/.env"
-    # Export only DB_* lines, strip comments
-    # shellcheck disable=SC2046
-    export $(grep -E '^DB_' "${SCRIPT_DIR}/.env" | sed 's/#.*//g' | xargs || true)
+    echo "[*] Loading configuration from .env"
+    set -a
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/.env"
+    set +a
 else
-    echo "ERROR: .env with DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD is required next to run.sh to run the tool."
+    echo "ERROR: .env file not found at ${SCRIPT_DIR}/.env"
+    echo "Create .env with DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD"
     exit 1
 fi
 
-# Fail fast if any DB_* is missing
-DB_HOST="${DB_HOST:?DB_HOST not set in .env}"
-DB_PORT="${DB_PORT:?DB_PORT not set in .env}"
-DB_NAME="${DB_NAME:?DB_NAME not set in .env}"
-DB_USER="${DB_USER:?DB_USER not set in .env}"
-DB_PASSWORD="${DB_PASSWORD:?DB_PASSWORD not set in .env}"
+# Verify required variables
+: "${DB_HOST:?DB_HOST not set in .env}"
+: "${DB_PORT:?DB_PORT not set in .env}"
+: "${DB_NAME:?DB_NAME not set in .env}"
+: "${DB_USER:?DB_USER not set in .env}"
+: "${DB_PASSWORD:?DB_PASSWORD not set in .env}"
 
 # -----------------------------------------------------------------------------
-# 4. Set up venv and install dependencies
+# 3. Setup Python virtual environment
 # -----------------------------------------------------------------------------
-cd "$REPO_DIR"
 
-echo "[*] Setting up Python virtual environment..."
-if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/activate" ]; then
-    echo "    Virtualenv '$VENV_DIR' already exists, reusing."
-else
-    echo "    Creating (or re-creating) virtualenv in '$VENV_DIR'..."
-    rm -rf "$VENV_DIR"
+cd "$SCRIPT_DIR"
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "[*] Creating Python virtual environment..."
     python3 -m venv "$VENV_DIR"
+    
+    echo "[*] Installing dependencies..."
+    "$VENV_DIR/bin/pip" install --upgrade pip --quiet
+    "$VENV_DIR/bin/pip" install -r requirements.txt --quiet
+else
+    # Check if requirements need updating (optional)
+    if [ requirements.txt -nt "$VENV_DIR/pyvenv.cfg" ]; then
+        echo "[*] Updating dependencies..."
+        "$VENV_DIR/bin/pip" install -r requirements.txt --quiet
+        touch "$VENV_DIR/pyvenv.cfg"
+    fi
 fi
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+# -----------------------------------------------------------------------------
+# 4. Verify input file exists
+# -----------------------------------------------------------------------------
 
-echo "[*] Installing Python dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
+if [ ! -f "$INPUT_FILE" ]; then
+    echo "ERROR: Input file not found: $INPUT_FILE"
+    exit 1
+fi
+
+# Count IPs in input file
+IP_COUNT=$(python3 -c "
+import json
+with open('$INPUT_FILE') as f:
+    data = json.load(f)
+    if isinstance(data, list):
+        print(len(data))
+    elif isinstance(data, dict) and 'servers' in data:
+        print(len(data['servers']))
+    else:
+        print(0)
+" 2>/dev/null || echo "0")
+
+echo "[*] Found $IP_COUNT DNS servers in $INPUT_FILE"
 
 # -----------------------------------------------------------------------------
-# 5. Write .env inside repo for the app (from loaded vars)
+# 5. Run DNS Analyzer (single cycle)
 # -----------------------------------------------------------------------------
-echo "[*] Writing .env for shared PostgreSQL inside repo..."
-cat > .env <<EOF
-DB_HOST=${DB_HOST}
-DB_PORT=${DB_PORT}
-DB_NAME=${DB_NAME}
-DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
-EOF
+
+echo "[*] Executing DNS Analyzer..."
+echo "    DB: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+echo "    Input: $INPUT_FILE"
+echo "    Delay: ${DELAY}s per server"
+echo ""
+
+# Run the analyzer
+"$VENV_DIR/bin/python3" main.py \
+    --input "$INPUT_FILE" \
+    --delay "$DELAY" \
+    2>&1
+
+EXIT_CODE=$?
 
 # -----------------------------------------------------------------------------
-# 6. Run the tool (single run)
+# 6. Report status
 # -----------------------------------------------------------------------------
-echo "[*] Running DNS Measurement System once..."
-python3 main.py
 
-echo "[*] Done."
+if [ $EXIT_CODE -eq 0 ]; then
+    echo ""
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS Analyzer - Completed successfully"
+    exit 0
+else
+    echo ""
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS Analyzer - Failed with exit code $EXIT_CODE"
+    exit $EXIT_CODE
+fi
