@@ -11,7 +11,6 @@ import subprocess
 import platform
 from typing import Optional, List, Tuple
 from ipaddress import ip_address
-
 from ipwhois import IPWhois  # currently only used by separate WHOIS script
 from models import DNSQueryLog, ServerResult
 from config import (
@@ -23,6 +22,7 @@ from config import (
     TRACEROUTE_TEST_DOMAIN,  # now unused but kept for compatibility
     CACHE_TTL_TEST_DOMAIN,
 )
+
 import datetime
 
 
@@ -34,9 +34,72 @@ class DNSChecker:
         self.system_hostname = "unknown"  # set in analyze()
 
     # ----------------------------------------------------------------------
+    # Static method for DNS capability checking
+    # ----------------------------------------------------------------------
+    @staticmethod
+    def check_dns_capability(ip: str, timeout: int = 3) -> dict:
+        """
+        Test if an IP address responds to DNS queries.
+        
+        Args:
+            ip: IP address to test
+            timeout: Query timeout in seconds (default: 3)
+        
+        Returns:
+            {
+                "is_dns_server": bool,
+                "supports_recursion": bool,
+                "latency_ms": float or None,
+                "rcode": str,
+                "error": str or None
+            }
+        """
+        result = {
+            "is_dns_server": False,
+            "supports_recursion": False,
+            "latency_ms": None,
+            "rcode": "UNKNOWN",
+            "error": None
+        }
+        
+        try:
+            # Build a simple A query for example.com
+            query = dns.message.make_query("example.com", dns.rdatatype.A, want_dnssec=False)
+            query.flags |= dns.flags.RD  # Set Recursion Desired
+            
+            # Send UDP query
+            start = time.time()
+            response = dns.query.udp(query, ip, timeout=timeout, port=53)
+            latency_ms = (time.time() - start) * 1000
+            
+            # Parse response
+            result["is_dns_server"] = True
+            result["latency_ms"] = round(latency_ms, 3)
+            result["rcode"] = dns.rcode.to_text(response.rcode())
+            
+            # Check recursion support (RA flag + valid answer)
+            ra_flag = bool(response.flags & dns.flags.RA)
+            has_answer = bool(response.answer)
+            result["supports_recursion"] = ra_flag and has_answer and response.rcode() == dns.rcode.NOERROR
+            
+        except dns.exception.Timeout:
+            result["error"] = "TIMEOUT"
+            result["rcode"] = "TIMEOUT"
+        except ConnectionRefusedError:
+            result["error"] = "CONNECTION_REFUSED"
+            result["rcode"] = "REFUSED"
+        except OSError as e:
+            result["error"] = f"NETWORK_ERROR: {str(e)[:50]}"
+            result["rcode"] = "ERROR"
+        except Exception as e:
+            result["error"] = f"EXCEPTION: {str(e)[:50]}"
+            result["rcode"] = "ERROR"
+        
+        return result
+
+    # ----------------------------------------------------------------------
     # Helpers
     # ----------------------------------------------------------------------
-
     def _safe_flags_to_str(self, flags: int) -> str:
         try:
             parts = []
@@ -91,7 +154,6 @@ class DNSChecker:
     ):
         """Log DNS query details including TTL."""
         ttl = self._extract_ttl(response) if response else None
-
         log = DNSQueryLog(
             server_ip=self.server_ip,
             system_hostname=self.system_hostname,
@@ -150,7 +212,7 @@ class DNSChecker:
 
     def check_recursion(self) -> Tuple[bool, bool, Optional[float], str]:
         """Check if server is recursive - returns (is_recursive, ra_flag_set, rtt, rcode)."""
-        print(f"    [STEP] Recursion check for {self.server_ip} (domain={RECURSION_TEST_DOMAIN})")
+        print(f"  [STEP] Recursion check for {self.server_ip} (domain={RECURSION_TEST_DOMAIN})")
         try:
             query, response, rtt = self._udp_query(
                 RECURSION_TEST_DOMAIN,
@@ -167,10 +229,11 @@ class DNSChecker:
             )
             self.log_query("A", RECURSION_TEST_DOMAIN, "recursion", response, rtt, "RD")
             print(
-                f"      result: recursive={is_recursive}, RA_flag={ra_flag_set}, "
+                f"    result: recursive={is_recursive}, RA_flag={ra_flag_set}, "
                 f"rcode={rcode}, rtt_ms={rtt:.3f}"
             )
             return is_recursive, ra_flag_set, rtt, rcode
+
         except dns.exception.Timeout:
             self.log_query(
                 "A",
@@ -180,16 +243,16 @@ class DNSChecker:
                 DNS_TIMEOUT * 1000,
                 "RD",
             )
-            print("      result: TIMEOUT")
+            print("    result: TIMEOUT")
             return False, False, None, "TIMEOUT"
         except Exception:
             self.log_query("A", RECURSION_TEST_DOMAIN, "recursion", None, None, "RD")
-            print("      result: ERROR (exception during recursion check)")
+            print("    result: ERROR (exception during recursion check)")
             return False, False, None, "ERROR"
 
     def check_latency(self) -> Tuple[Optional[float], str]:
         """Measure latency - returns (latency_ms, rcode)."""
-        print(f"    [STEP] Latency check for {self.server_ip} (domain={LATENCY_TEST_DOMAIN})")
+        print(f"  [STEP] Latency check for {self.server_ip} (domain={LATENCY_TEST_DOMAIN})")
         try:
             query, response, rtt = self._udp_query(
                 LATENCY_TEST_DOMAIN,
@@ -199,8 +262,9 @@ class DNSChecker:
             rcode = dns.rcode.to_text(response.rcode())
             self.log_query("A", LATENCY_TEST_DOMAIN, "latency", response, rtt)
             rtt_str = f"{rtt:.3f}" if response else "N/A"
-            print(f"      result: rcode={rcode}, rtt_ms={rtt_str}")
+            print(f"    result: rcode={rcode}, rtt_ms={rtt_str}")
             return (rtt if response else None), rcode
+
         except dns.exception.Timeout:
             self.log_query(
                 "A",
@@ -209,17 +273,16 @@ class DNSChecker:
                 None,
                 DNS_TIMEOUT * 1000,
             )
-            print("      result: TIMEOUT")
+            print("    result: TIMEOUT")
             return None, "TIMEOUT"
         except Exception:
             self.log_query("A", LATENCY_TEST_DOMAIN, "latency", None, None)
-            print("      result: ERROR (exception during latency check)")
+            print("    result: ERROR (exception during latency check)")
             return None, "ERROR"
 
     def get_whois_info(self) -> Tuple[str, str, str, str]:
         """
         Get WHOIS information for this server IP.
-
         Current behavior:
         - Uses database cache (whois_cache) if available.
         - Does not perform live RDAP lookups here.
@@ -229,17 +292,16 @@ class DNSChecker:
             if cached:
                 org, asn, asn_desc, country = cached
                 print(
-                    "    [STEP] WHOIS (cache): "
+                    "  [STEP] WHOIS (cache): "
                     f"org={org}, asn={asn}, asn_desc={asn_desc}, country={country}"
                 )
                 return cached
-
-        print("    [STEP] WHOIS: no cached entry, returning N/A placeholders")
+        print("  [STEP] WHOIS: no cached entry, returning N/A placeholders")
         return "N/A", "N/A", "N/A", "N/A"
 
     def check_dnssec(self) -> Tuple[bool, bool, str, Optional[float]]:
         """Check DNSSEC validation using AD flag."""
-        print(f"    [STEP] DNSSEC check for {self.server_ip} (domain={DNSSEC_TEST_DOMAIN})")
+        print(f"  [STEP] DNSSEC check for {self.server_ip} (domain={DNSSEC_TEST_DOMAIN})")
         try:
             query, response, rtt = self._udp_query(
                 DNSSEC_TEST_DOMAIN,
@@ -259,10 +321,11 @@ class DNSChecker:
                 query_flags="DO",
             )
             print(
-                f"      result: dnssec_enabled={dnssec_enabled}, AD_flag={ad_flag_set}, "
+                f"    result: dnssec_enabled={dnssec_enabled}, AD_flag={ad_flag_set}, "
                 f"rcode={rcode}, rtt_ms={rtt:.3f}"
             )
             return dnssec_enabled, ad_flag_set, rcode, rtt
+
         except dns.exception.Timeout:
             self.log_query(
                 "A",
@@ -272,7 +335,7 @@ class DNSChecker:
                 DNS_TIMEOUT * 1000,
                 query_flags="DO",
             )
-            print("      result: TIMEOUT")
+            print("    result: TIMEOUT")
             return False, False, "TIMEOUT", None
         except Exception:
             self.log_query(
@@ -283,13 +346,13 @@ class DNSChecker:
                 None,
                 query_flags="DO",
             )
-            print("      result: ERROR (exception during DNSSEC check)")
+            print("    result: ERROR (exception during DNSSEC check)")
             return False, False, "ERROR", None
 
     def check_malicious_blocking(self) -> Tuple[bool, str, Optional[float]]:
         """Check if server blocks malicious domains."""
         print(
-            f"    [STEP] Malicious-domain check for {self.server_ip} "
+            f"  [STEP] Malicious-domain check for {self.server_ip} "
             f"(domain={MALICIOUS_TEST_DOMAIN})"
         )
         try:
@@ -305,10 +368,11 @@ class DNSChecker:
             ) or (not response.answer)
             self.log_query("A", MALICIOUS_TEST_DOMAIN, "malicious", response, rtt)
             print(
-                f"      result: blocks={blocks_malicious}, rcode={rcode_text}, "
+                f"    result: blocks={blocks_malicious}, rcode={rcode_text}, "
                 f"rtt_ms={rtt:.3f}"
             )
             return blocks_malicious, rcode_text, rtt
+
         except dns.exception.Timeout:
             self.log_query(
                 "A",
@@ -317,17 +381,16 @@ class DNSChecker:
                 None,
                 DNS_TIMEOUT * 1000,
             )
-            print("      result: TIMEOUT")
+            print("    result: TIMEOUT")
             return False, "TIMEOUT", None
         except Exception:
             self.log_query("A", MALICIOUS_TEST_DOMAIN, "malicious", None, None)
-            print("      result: ERROR (exception during malicious-domain check)")
+            print("    result: ERROR (exception during malicious-domain check)")
             return False, "ERROR", None
 
     # ----------------------------------------------------------------------
     # Traceroute test (to resolver IP itself)
     # ----------------------------------------------------------------------
-
     def _run_traceroute_command(
         self,
         dest_ip: str,
@@ -356,6 +419,7 @@ class DNSChecker:
             success = proc.returncode == 0
             status = "OK" if success else f"EXIT_{proc.returncode}"
             return success, status, output, elapsed_ms
+
         except FileNotFoundError:
             elapsed_ms = (time.time() - start) * 1000
             return False, "NO_TRACEROUTE", "traceroute/tracert command not found", elapsed_ms
@@ -370,19 +434,16 @@ class DNSChecker:
         """
         Traceroute directly from the local machine to this DNS server IP
         (self.server_ip), without involving a test domain.
-
         Logs one entry into dns_query_logs with test_type='traceroute'.
         """
         print(
-            f"    [STEP] Traceroute test to resolver {self.server_ip} "
+            f"  [STEP] Traceroute test to resolver {self.server_ip} "
             f"(from local host)"
         )
-
         success, status, output, elapsed_ms = self._run_traceroute_command(self.server_ip)
         self.log_traceroute(self.server_ip, status, output, elapsed_ms)
-
         print(
-            f"      result: success={success}, status={status}, "
+            f"    result: success={success}, status={status}, "
             f"total_time_ms={elapsed_ms:.3f}"
         )
         return success, status, elapsed_ms
@@ -390,11 +451,9 @@ class DNSChecker:
     # ----------------------------------------------------------------------
     # DNS cache TTL test (isc.org), only for local ISP/DHCP resolvers
     # ----------------------------------------------------------------------
-
     def check_cache_ttl(self) -> Tuple[Optional[int], str]:
         """
         Cache TTL / invalidation probe using CACHE_TTL_TEST_DOMAIN (isc.org).
-
         Runs only for private, ISP-assigned resolvers (e.g. 192.168.x.x).
         - First: 4 A queries with 1s delay between them.
         - If the last observed TTL <= 3, send 15 more probes with 1s delay.
@@ -402,10 +461,9 @@ class DNSChecker:
         - Returns (ttl_last, rcode_last).
         """
         print(
-            f"    [STEP] Cache TTL test for {self.server_ip} "
+            f"  [STEP] Cache TTL test for {self.server_ip} "
             f"(domain={CACHE_TTL_TEST_DOMAIN})"
         )
-
         last_ttl: Optional[int] = None
         last_rcode: str = "N/A"
 
@@ -426,15 +484,12 @@ class DNSChecker:
                     rtt,
                     "RD",
                 )
-
                 ttl = self._extract_ttl(response) if response else None
                 last_ttl = ttl
                 last_rcode = rcode
-
                 rtt_str = f"{rtt:.3f}" if response else "N/A"
-
                 print(
-                    f"      probe {i}: rcode={rcode}, "
+                    f"    probe {i}: rcode={rcode}, "
                     f"ttl={ttl if ttl is not None else 'N/A'}, "
                     f"rtt_ms={rtt_str}"
                 )
@@ -450,7 +505,7 @@ class DNSChecker:
                 )
                 last_ttl = None
                 last_rcode = "TIMEOUT"
-                print(f"      probe {i}: TIMEOUT")
+                print(f"    probe {i}: TIMEOUT")
             except Exception as e:
                 self.log_query(
                     "A",
@@ -462,7 +517,7 @@ class DNSChecker:
                 )
                 last_ttl = None
                 last_rcode = "ERROR"
-                print(f"      probe {i}: ERROR during cache TTL test: {e}")
+                print(f"    probe {i}: ERROR during cache TTL test: {e}")
 
             if i < 4:
                 time.sleep(1)
@@ -470,7 +525,7 @@ class DNSChecker:
         # Second phase: high-resolution probes when TTL is about to expire
         if last_ttl is not None and last_ttl <= 3 and last_rcode == "NOERROR":
             print(
-                f"    [STEP] Cache TTL near expiry for {self.server_ip} "
+                f"  [STEP] Cache TTL near expiry for {self.server_ip} "
                 f"(ttl={last_ttl}) - sending 15 additional probes"
             )
             for j in range(1, 16):
@@ -489,15 +544,12 @@ class DNSChecker:
                         rtt,
                         "RD",
                     )
-
                     ttl = self._extract_ttl(response) if response else None
                     last_ttl = ttl
                     last_rcode = rcode
-
                     rtt_str = f"{rtt:.3f}" if response else "N/A"
-
                     print(
-                        f"      fine-probe {j}: rcode={rcode}, "
+                        f"    fine-probe {j}: rcode={rcode}, "
                         f"ttl={ttl if ttl is not None else 'N/A'}, "
                         f"rtt_ms={rtt_str}"
                     )
@@ -513,7 +565,7 @@ class DNSChecker:
                     )
                     last_ttl = None
                     last_rcode = "TIMEOUT"
-                    print(f"      fine-probe {j}: TIMEOUT")
+                    print(f"    fine-probe {j}: TIMEOUT")
                 except Exception as e:
                     self.log_query(
                         "A",
@@ -525,13 +577,13 @@ class DNSChecker:
                     )
                     last_ttl = None
                     last_rcode = "ERROR"
-                    print(f"      fine-probe {j}: ERROR during cache TTL test: {e}")
+                    print(f"    fine-probe {j}: ERROR during cache TTL test: {e}")
 
                 if j < 15:
                     time.sleep(1)
 
         print(
-            "      summary: last_rcode="
+            "    summary: last_rcode="
             f"{last_rcode}, last_ttl={last_ttl if last_ttl is not None else 'N/A'}"
         )
         return last_ttl, last_rcode
@@ -539,7 +591,6 @@ class DNSChecker:
     # ----------------------------------------------------------------------
     # Orchestrator
     # ----------------------------------------------------------------------
-
     def analyze(
         self,
         is_isp_assigned: bool = False,
@@ -597,7 +648,7 @@ class DNSChecker:
         if is_isp_assigned and self._is_private_ip():
             cache_ttl, cache_ttl_rcode = self.check_cache_ttl()
         else:
-            print("    [STEP] Cache TTL test skipped (not local ISP/DHCP resolver)")
+            print("  [STEP] Cache TTL test skipped (not local ISP/DHCP resolver)")
 
         # Smart interpretation: If server is not responsive, set blocking/DNSSEC to None
         if not server_responsive:

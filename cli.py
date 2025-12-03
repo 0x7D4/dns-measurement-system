@@ -1,52 +1,73 @@
-#!/usr/bin/env python3
-"""
-CLI utilities for DNS Server Analyzer (argparse + startup banner).
-"""
-
 import argparse
-
-from config import (
-    INPUT_FILE,
-    RECURSION_TEST_DOMAIN,
-    LATENCY_TEST_DOMAIN,
-    DNSSEC_TEST_DOMAIN,
-    MALICIOUS_TEST_DOMAIN,
-)
-from utils import get_ist_timestamp
+import sys
+from datetime import datetime
+from config import INPUT_FILE, DEFAULT_DELAY, LOOP_INTERVAL
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments for a single-run analyzer."""
+def get_utc_timestamp() -> str:
+    """Get current timestamp in UTC."""
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def print_startup_banner():
+    """Print ASCII art startup banner."""
+    banner = """
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                                                              ║
+    ║              DNS Server Analyzer - v2.0                      ║
+    ║         Distributed Measurement & Analysis System            ║
+    ║                                                              ║
+    ║  Features:                                                   ║
+    ║   • Recursion Detection                                      ║
+    ║   • Latency Measurement                                      ║
+    ║   • DNSSEC Validation                                        ║
+    ║   • Malicious Domain Blocking                                ║
+    ║   • WHOIS/ASN Enrichment                                     ║
+    ║   • Cache TTL Analysis                                       ║
+    ║   • Distributed Anchor Tracking                              ║
+    ║   • DNS Capability Detection                                 ║
+    ║                                                              ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
+    print(banner)
+    print(f"    Started: {get_utc_timestamp()}")
+    print()
+
+
+def parse_args():
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="DNS Server Analyzer - Single-run mode with per-server connections"
+        description="DNS Server Analyzer - Measure and analyze DNS resolver performance",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument(
-        "-i",
         "--input",
+        "-i",
+        type=str,
         default=INPUT_FILE,
-        help=f"Input JSON file (default: {INPUT_FILE})",
+        help=f"Input JSON file with DNS server IPs (default: {INPUT_FILE})",
     )
+
     parser.add_argument(
-        "-d",
         "--delay",
+        "-d",
         type=float,
-        default=0.1,
-        help="Delay between servers in seconds (default: 0.1)",
+        default=DEFAULT_DELAY,
+        help=f"Delay between server tests in seconds (default: {DEFAULT_DELAY})",
+    )
+
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run analysis once and exit (default: continuous with timer)",
+    )
+
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=LOOP_INTERVAL,
+        help=f"Interval between analysis cycles in seconds (default: {LOOP_INTERVAL})",
     )
 
     return parser.parse_args()
-
-
-def print_startup_banner(args: argparse.Namespace) -> None:
-    """Print initial startup banner and configuration."""
-    print(f"\n{'='*80}")
-    print("DNS Server Analyzer - Single Run (Per-Server Connections)")
-    print(f"Started at: {get_ist_timestamp()}")
-    print("Mode: SINGLE RUN (triggered by systemd timer)")
-    print("Test Domains:")
-    print(f"  - Recursion: {RECURSION_TEST_DOMAIN}")
-    print(f"  - Latency:   {LATENCY_TEST_DOMAIN}")
-    print(f"  - DNSSEC:    {DNSSEC_TEST_DOMAIN}")
-    print(f"  - Malicious: {MALICIOUS_TEST_DOMAIN}")
-    print(f"{'='*80}\n")

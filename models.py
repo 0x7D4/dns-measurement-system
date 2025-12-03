@@ -1,79 +1,88 @@
-# models.py
-
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional, List, Dict, Any
+from dataclasses import dataclass, field
+from typing import List, Optional
+import datetime
 
 
 @dataclass
 class DNSQueryLog:
-    """Model for logging DNS queries to PostgreSQL"""
+    """
+    Represents a single DNS query and its response.
+    Logged for detailed analysis and debugging.
+    All timestamps are in UTC.
+    """
     server_ip: str
     system_hostname: str
-    query_type: str
-    query_name: str
-    query_flags: str
-    response_rcode: str
-    response_flags: str
-    response_answer: Optional[str]
-    response_ttl: Optional[int]
-    response_time_ms: Optional[float]
-    timestamp: datetime
-    test_type: str
+    query_type: str  # A, AAAA, CNAME, etc.
+    query_name: str  # Domain queried
+    query_flags: str  # RD, AD, CD, DO, etc.
+    response_rcode: str  # NOERROR, NXDOMAIN, SERVFAIL, etc.
+    response_flags: str  # QR, AA, TC, RD, RA, AD, CD
+    response_answer: Optional[str]  # Answer section (RRsets)
+    response_ttl: Optional[int]  # TTL from answer
+    response_time_ms: Optional[float]  # Query latency
+    timestamp: datetime.datetime  # UTC timestamp
+    test_type: str  # recursion, latency, dnssec, malicious, cache_ttl, traceroute
 
 
 @dataclass
 class ServerResult:
-    """Complete analysis result for a DNS server"""
+    """
+    Aggregated analysis result for a single DNS server.
+    Stored in server_analysis_results table.
+    All timestamps are in UTC.
+    """
     server_ip: str
     system_hostname: str
     public_ip: Optional[str]
-    timestamp: datetime
-
+    timestamp: datetime.datetime  # UTC timestamp
+    
+    # Recursion
     is_recursive: bool
     ra_flag_set: bool
+    
+    # Performance
     latency_ms: Optional[float]
-
+    
+    # WHOIS/Geolocation
     organization: str
     asn: str
     asn_description: str
     country: str
-
+    
+    # DNSSEC
     dnssec_enabled: Optional[bool]
     ad_flag_set: bool
     dnssec_rcode: str
-
+    
+    # Malicious blocking
     malicious_blocking: Optional[bool]
     malicious_rcode: str
+    
+    # Metadata
+    is_isp_assigned: bool = False
+    server_responsive: bool = True
+    test_reliability: str = "RELIABLE"
+    failure_reason: Optional[str] = None
+    
+    # Associated query logs
+    query_logs: List[DNSQueryLog] = field(default_factory=list)
 
-    is_isp_assigned: bool
-    server_responsive: bool
-    test_reliability: str
-    failure_reason: Optional[str]
 
-    query_logs: List[DNSQueryLog]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "server_ip": self.server_ip,
-            "system_hostname": self.system_hostname,
-            "public_ip": self.public_ip,
-            "timestamp": self.timestamp.isoformat(),
-            "is_recursive": self.is_recursive,
-            "ra_flag_set": self.ra_flag_set,
-            "latency_ms": self.latency_ms,
-            "organization": self.organization,
-            "asn": self.asn,
-            "asn_description": self.asn_description,
-            "country": self.country,
-            "dnssec_enabled": self.dnssec_enabled,
-            "ad_flag_set": self.ad_flag_set,
-            "dnssec_rcode": self.dnssec_rcode,
-            "malicious_blocking": self.malicious_blocking,
-            "malicious_rcode": self.malicious_rcode,
-            "is_isp_assigned": self.is_isp_assigned,
-            "server_responsive": self.server_responsive,
-            "test_reliability": self.test_reliability,
-            "failure_reason": self.failure_reason,
-            "query_logs": [log.__dict__ for log in self.query_logs],
-        }
+@dataclass
+class MeasurementHost:
+    """
+    Represents a measurement anchor (device running the analysis).
+    Stored in measurement_hosts table.
+    All timestamps are in UTC.
+    """
+    system_hostname: str
+    public_ip: Optional[str]
+    organization: Optional[str]
+    asn: Optional[str]
+    asn_description: Optional[str]
+    country: Optional[str]
+    supports_dns: bool = False
+    supports_recursion: bool = False
+    dns_latency_ms: Optional[float] = None
+    first_seen: datetime.datetime = field(default_factory=datetime.datetime.utcnow)
+    last_seen: datetime.datetime = field(default_factory=datetime.datetime.utcnow)

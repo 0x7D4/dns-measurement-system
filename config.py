@@ -21,7 +21,12 @@ TRACEROUTE_TEST_DOMAIN = "ietf.org"     # used by traceroute test
 CACHE_TTL_TEST_DOMAIN = "isc.org"       # used by DNS cache TTL/invalidation test
 
 # Input and scheduling
+<<<<<<< HEAD
 INPUT_FILE = os.getenv("INPUT_FILE", "test.json")
 LOOP_INTERVAL = 3600  # 1 hour
+=======
+INPUT_FILE = "test.json"
+LOOP_INTERVAL = 1
+>>>>>>> fec29e9 (updated timezone to UTC, added public  IP DNS info and a few minor changes to CLI)
 DEFAULT_DELAY = 0.1
 DEFAULT_BATCH_SIZE = 100

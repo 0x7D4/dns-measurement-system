@@ -1,5 +1,3 @@
-# utils.py
-
 import json
 import socket
 import subprocess
@@ -9,40 +7,38 @@ import os
 import glob
 from typing import List, Set
 from datetime import datetime
-import pytz
 
 
 def load_dns_servers(json_file: str) -> List[str]:
     """
     Load DNS server IPs from JSON file.
-
     Supports both formats:
-    - New format: List of objects with 'ip' field (in.json)
-    - Old format: List of objects with 'servers' array (recursive_servers_detailed.json)
+    - New format: List of objects with "ip" field (*.json)
+    - Old format: List of objects with "servers" array (recursive_servers_detailed.json)
     """
     with open(json_file, 'r') as f:
         data = json.load(f)
 
     dns_servers: List[str] = []
 
-    # New format: List of objects with 'ip' field directly
-    if isinstance(data, list) and len(data) > 0 and 'ip' in data[0]:
+    # New format: List of objects with "ip" field directly
+    if isinstance(data, list) and len(data) > 0 and "ip" in data[0]:
         for item in data:
-            if 'ip' in item and item['ip']:
-                ip = item['ip'].strip()
+            if "ip" in item and item["ip"]:
+                ip = item["ip"].strip()
                 if ip and ip not in dns_servers:
                     dns_servers.append(ip)
         print(f"Loaded {len(dns_servers)} IPs from new format (direct IP list)")
 
-    # Old format: List of dicts with nested 'servers' array
+    # Old format: List of dicts with nested "servers" array
     elif isinstance(data, list):
         for item in data:
-            if 'servers' in item and isinstance(item['servers'], list):
-                for server in item['servers']:
+            if "servers" in item and isinstance(item["servers"], list):
+                for server in item["servers"]:
                     if isinstance(server, str):
                         ip = server.strip()
-                    elif isinstance(server, dict) and 'ip' in server:
-                        ip = server['ip'].strip()
+                    elif isinstance(server, dict) and "ip" in server:
+                        ip = server["ip"].strip()
                     else:
                         continue
                     if ip and ip not in dns_servers:
@@ -51,12 +47,12 @@ def load_dns_servers(json_file: str) -> List[str]:
 
     # Dict format
     elif isinstance(data, dict):
-        if 'servers' in data and isinstance(data['servers'], list):
-            for server in data['servers']:
+        if "servers" in data and isinstance(data["servers"], list):
+            for server in data["servers"]:
                 if isinstance(server, str):
                     ip = server.strip()
-                elif isinstance(server, dict) and 'ip' in server:
-                    ip = server['ip'].strip()
+                elif isinstance(server, dict) and "ip" in server:
+                    ip = server["ip"].strip()
                 else:
                     continue
                 if ip and ip not in dns_servers:
@@ -69,10 +65,9 @@ def load_dns_servers(json_file: str) -> List[str]:
     return dns_servers
 
 
-def get_ist_timestamp() -> str:
-    """Get current timestamp in IST timezone"""
-    ist = pytz.timezone('Asia/Kolkata')
-    return datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S %Z')
+def get_utc_timestamp() -> str:
+    """Get current timestamp in UTC."""
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def get_system_dns_servers() -> Set[str]:
@@ -87,20 +82,20 @@ def get_system_dns_servers() -> Set[str]:
         if system == "Windows":
             # Windows: Use ipconfig /all
             result = subprocess.run(
-                ['ipconfig', '/all'],
+                ["ipconfig", "/all"],
                 capture_output=True,
                 text=True,
-                encoding='cp1252',  # Windows console encoding
+                encoding="cp1252",  # Windows console encoding
             )
-            for line in result.stdout.split('\n'):
+            for line in result.stdout.split("\n"):
                 line = line.strip()
-                if 'DNS Servers' in line or 'DNS-Server' in line:
-                    parts = line.split(':', 1)
+                if "DNS Servers" in line or "DNS-Server" in line:
+                    parts = line.split(":", 1)
                     if len(parts) == 2:
                         ip = parts[1].strip()
                         if ip and ip[0].isdigit() and validate_ip(ip):
                             dns_servers.add(ip)
-                elif line and line[0].isdigit() and '.' in line:
+                elif line and line[0].isdigit() and "." in line:
                     # Continuation line with just IP
                     ip = line.strip()
                     if validate_ip(ip):
@@ -109,12 +104,12 @@ def get_system_dns_servers() -> Set[str]:
         elif system == "Linux":
             # Linux: Check /etc/resolv.conf
             try:
-                with open('/etc/resolv.conf', 'r') as f:
+                with open("/etc/resolv.conf", "r") as f:
                     for line in f:
                         line = line.strip()
-                        if line.startswith('nameserver'):
+                        if line.startswith("nameserver"):
                             parts = line.split()
-                            if len(parts) >= 2:
+                            if len(parts) == 2:
                                 ip = parts[1]
                                 if validate_ip(ip):
                                     dns_servers.add(ip)
@@ -124,14 +119,14 @@ def get_system_dns_servers() -> Set[str]:
         elif system == "Darwin":  # macOS
             # macOS: Use scutil --dns
             result = subprocess.run(
-                ['scutil', '--dns'],
+                ["scutil", "--dns"],
                 capture_output=True,
                 text=True,
             )
-            for line in result.stdout.split('\n'):
+            for line in result.stdout.split("\n"):
                 line = line.strip()
-                if 'nameserver' in line.lower():
-                    parts = line.split(':')
+                if "nameserver" in line.lower():
+                    parts = line.split()
                     if len(parts) == 2:
                         ip = parts[1].strip()
                         if validate_ip(ip):
@@ -146,25 +141,17 @@ def get_system_dns_servers() -> Set[str]:
 def get_dhcp_server_ips() -> Set[str]:
     """
     Detect DHCP server IPs (typically router/gateway that leases addresses).
-
-    Windows:
-        Parse `ipconfig /all` and read the "DHCP Server" line.
-
-    Linux:
-        Best-effort parse of common dhclient/dhcpcd lease files and
-        systemd-networkd lease files:
-          - /var/lib/dhcp/dhclient*.leases
-          - /var/lib/dhcpcd/*.lease
-          - /run/systemd/netif/leases/*
-
-        For dhclient-style leases, we look for:
-            option dhcp-server-identifier <ip>;
-
-        For systemd-networkd leases, we look for:
-            SERVER_ADDRESS=<ip> or DHCP_SERVER_IDENTIFIER=<ip>
-
-    Other OS:
-        Returns an empty set by default.
+    
+    Windows: Parse ipconfig /all and read the "DHCP Server" line.
+    Linux: Best-effort parse of common dhclient/dhcpcd lease files and systemd-networkd lease files:
+        - /var/lib/dhcp/dhclient*.leases
+        - /var/lib/dhcpcd/*.lease
+        - /run/systemd/netif/leases/*
+    
+    For dhclient-style leases, we look for: option dhcp-server-identifier <ip>;
+    For systemd-networkd leases, we look for: SERVER_ADDRESS=<ip> or DHCP_SERVER_IDENTIFIER=<ip>
+    
+    Other OS: Returns an empty set by default.
     """
     servers: Set[str] = set()
     system = platform.system()
@@ -196,16 +183,15 @@ def get_dhcp_server_ips() -> Set[str]:
             for path in lease_paths:
                 try:
                     with open(path, "r") as f:
-                        # Keep last occurrence (latest lease) in the file
+                        # Keep last occurrence (latest lease in the file)
                         last_ip = None
                         for line in f:
                             line = line.strip()
                             if "dhcp-server-identifier" in line:
-                                # e.g.: option dhcp-server-identifier 192.0.2.1;
+                                # e.g. "option dhcp-server-identifier 192.0.2.1;"
                                 parts = line.replace(";", "").split()
-                                # last token should be IP
                                 if parts:
-                                    candidate = parts[-1]
+                                    candidate = parts[-1]  # last token should be IP
                                     if validate_ip(candidate):
                                         last_ip = candidate
                         if last_ip:
@@ -213,7 +199,7 @@ def get_dhcp_server_ips() -> Set[str]:
                 except (IOError, OSError):
                     continue
 
-            # 2) systemd-networkd leases: /run/systemd/netif/leases/*
+            # 2) systemd-networkd leases (/run/systemd/netif/leases/*)
             netif_dir = "/run/systemd/netif/leases"
             if os.path.isdir(netif_dir):
                 for fname in os.listdir(netif_dir):
@@ -222,7 +208,6 @@ def get_dhcp_server_ips() -> Set[str]:
                         continue
                     try:
                         with open(path, "r") as f:
-                            # Prefer DHCP_SERVER_IDENTIFIER, fall back to SERVER_ADDRESS
                             dhcp_id_ip = None
                             server_addr_ip = None
                             for line in f:
@@ -235,6 +220,8 @@ def get_dhcp_server_ips() -> Set[str]:
                                     value = line.split("=", 1)[1].strip()
                                     if validate_ip(value):
                                         server_addr_ip = value
+
+                            # Prefer DHCP_SERVER_IDENTIFIER, fall back to SERVER_ADDRESS
                             if dhcp_id_ip:
                                 servers.add(dhcp_id_ip)
                             elif server_addr_ip:
@@ -242,7 +229,7 @@ def get_dhcp_server_ips() -> Set[str]:
                     except (IOError, OSError):
                         continue
 
-        # macOS / others: nothing for now, could be extended later.
+        # macOS, others: nothing for now, could be extended later
 
     except Exception as e:
         print(f"Warning: could not detect DHCP servers: {e}")
@@ -251,17 +238,17 @@ def get_dhcp_server_ips() -> Set[str]:
 
 
 def validate_ip(ip: str) -> bool:
-    """Validate if string is a valid IPv4 address"""
+    """Validate if string is a valid IPv4 address."""
     try:
         socket.inet_aton(ip)
-        parts = ip.split('.')
+        parts = ip.split(".")
         return len(parts) == 4 and all(0 <= int(part) <= 255 for part in parts)
     except (socket.error, ValueError):
         return False
 
 
 def get_system_hostname() -> str:
-    """Get system hostname"""
+    """Get system hostname."""
     try:
         return socket.gethostname()
     except Exception:
@@ -269,9 +256,9 @@ def get_system_hostname() -> str:
 
 
 def get_public_ip() -> str:
-    """Get public IP address"""
+    """Get public IP address."""
     try:
-        response = requests.get('https://api.ipify.org?format=text', timeout=5)
+        response = requests.get("https://api.ipify.org?format=text", timeout=5)
         if response.status_code == 200:
             return response.text.strip()
     except Exception:
@@ -279,7 +266,7 @@ def get_public_ip() -> str:
 
     # Fallback method
     try:
-        response = requests.get('https://ifconfig.me/ip', timeout=5)
+        response = requests.get("https://ifconfig.me/ip", timeout=5)
         if response.status_code == 200:
             return response.text.strip()
     except Exception:
