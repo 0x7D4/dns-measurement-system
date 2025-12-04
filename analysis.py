@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from typing import List, Set, Optional
 from ipaddress import ip_address
+
 from database import PostgreSQLDatabase
 from dns_checker import DNSChecker
 from utils import (
@@ -20,11 +21,12 @@ from utils import (
 )
 from ipwhois import IPWhois
 
+# HARDCODED FILTER: IPs to exclude from analysis
+EXCLUDED_IPS = {"172.31.31.31"}
 
 def get_utc_timestamp() -> str:
     """Get current timestamp in UTC."""
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-
 
 def analyze_server(
     server_ip: str,
@@ -33,12 +35,18 @@ def analyze_server(
     public_ip: Optional[str],
 ) -> bool:
     """Analyze a single DNS server with isolated database connection."""
+    
+    # SKIP EXCLUDED IPs
+    if server_ip in EXCLUDED_IPS:
+        print(f"[{datetime.utcnow().strftime('%H:%M:%S')} UTC] 🚫 Skipping excluded IP: {server_ip}")
+        return True  # Return True to not count as failed
+    
     db = None
     try:
         print(f"\n[{datetime.utcnow().strftime('%H:%M:%S')} UTC] Analyzing {server_ip}")
         is_isp_assigned = server_ip in isp_related_servers
         if is_isp_assigned:
-            print("  🌐 ISP/DHCP-related DNS server")
+            print("   🌐 ISP/DHCP-related DNS server")
 
         # Open fresh DB connection for this server
         db = PostgreSQLDatabase()
@@ -60,7 +68,7 @@ def analyze_server(
         isp_marker = "🌐" if is_isp_assigned else "  "
         reliability_marker = ""
         if result.test_reliability != "RELIABLE":
-            reliability_marker = " ⚠️ "
+            reliability_marker = " ⚠️  "
 
         latency = f"{result.latency_ms:.2f}ms" if result.latency_ms else "N/A"
         dnssec = (
@@ -76,12 +84,12 @@ def analyze_server(
 
         print(f"  {status}{isp_marker} {server_ip:43s}{reliability_marker}")
         print(
-            f"    Latency: {latency:10s} | DNSSEC: {dnssec:3s} | "
+            f"     Latency: {latency:10s} | DNSSEC: {dnssec:3s} | "
             f"Blocking: {blocking:3s} | Org: {result.organization[:20]}"
         )
 
         if result.failure_reason:
-            print(f"    ⚠️  {result.failure_reason}")
+            print(f"     ⚠️  {result.failure_reason}")
 
         return True
 
@@ -97,7 +105,6 @@ def analyze_server(
                 db.close()
             except Exception:
                 pass
-
 
 def get_whois_cache_stats() -> dict:
     """Get WHOIS cache statistics using a temporary connection."""
@@ -115,14 +122,15 @@ def get_whois_cache_stats() -> dict:
             except Exception:
                 pass
 
-
 def enrich_whois_data_for_servers(dns_servers: List[str], max_lookups: int = 100) -> int:
     """
     Pre-enrich WHOIS data for DNS servers before analysis.
     Only processes IPs that don't have WHOIS data yet.
+    
     Args:
         dns_servers: List of DNS server IPs to check
         max_lookups: Maximum number of WHOIS lookups per run (default: 100)
+    
     Returns:
         Number of IPs enriched in this run
     """
@@ -138,7 +146,7 @@ def enrich_whois_data_for_servers(dns_servers: List[str], max_lookups: int = 100
             # Skip private IPs - save placeholder immediately
             try:
                 if ip_address(ip).is_private:
-                    print(f"  Skipping private IP {ip}")
+                    print(f"   Skipping private IP {ip}")
                     # Save placeholder for private IPs so we don't keep trying
                     db.save_whois_cache(
                         server_ip=ip,
@@ -158,7 +166,7 @@ def enrich_whois_data_for_servers(dns_servers: List[str], max_lookups: int = 100
                 ips_needing_whois.append(ip)
 
         if private_ips_saved > 0:
-            print(f"  Saved {private_ips_saved} private IPs with placeholder data")
+            print(f"   Saved {private_ips_saved} private IPs with placeholder data")
 
         if not ips_needing_whois:
             print("✅ All DNS servers already have WHOIS data cached.")
@@ -171,7 +179,7 @@ def enrich_whois_data_for_servers(dns_servers: List[str], max_lookups: int = 100
         print("\n" + "=" * 80)
         print(f"WHOIS Pre-Enrichment: Processing {len(ips_to_process)} IPs")
         if remaining > 0:
-            print(f"  {remaining} IPs will be processed in next run(s)")
+            print(f"   {remaining} IPs will be processed in next run(s)")
         print("=" * 80)
 
         success_count = 0
@@ -226,7 +234,7 @@ def enrich_whois_data_for_servers(dns_servers: List[str], max_lookups: int = 100
                         country="Unknown"
                     )
                 except Exception as save_err:
-                    print(f"  ⚠️  Could not save error to cache: {save_err}")
+                    print(f"   ⚠️ Could not save error to cache: {save_err}")
                 failed_count += 1
 
         print("-" * 80)
@@ -249,7 +257,6 @@ def enrich_whois_data_for_servers(dns_servers: List[str], max_lookups: int = 100
             except Exception:
                 pass
 
-
 def record_localhost_identity(system_hostname: str, public_ip: Optional[str]) -> None:
     """
     Resolve WHOIS/AS info for the local measurement host and store it in measurement_hosts.
@@ -269,10 +276,10 @@ def record_localhost_identity(system_hostname: str, public_ip: Optional[str]) ->
         dns_capability = DNSChecker.check_dns_capability(public_ip, timeout=3)
 
         if dns_capability["is_dns_server"]:
-            print(f"  ✓ DNS server detected | Latency: {dns_capability['latency_ms']:.1f}ms | "
+            print(f"   ✓ DNS server detected | Latency: {dns_capability['latency_ms']:.1f}ms | "
                   f"Recursion: {'Yes' if dns_capability['supports_recursion'] else 'No'}")
         else:
-            print(f"  ✗ No DNS service detected | Reason: {dns_capability['error'] or 'No response'}")
+            print(f"   ✗ No DNS service detected | Reason: {dns_capability['error'] or 'No response'}")
 
         # 2. WHOIS lookup for the host's public IP
         try:
@@ -283,7 +290,7 @@ def record_localhost_identity(system_hostname: str, public_ip: Optional[str]) ->
                 # Fallback if library signature is older
                 rdap = w.lookup_rdap()
         except Exception as e:
-            print(f"  [HOST] WHOIS lookup failed: {e}")
+            print(f"   [HOST] WHOIS lookup failed: {e}")
             rdap = {}
 
         org = (
@@ -309,7 +316,7 @@ def record_localhost_identity(system_hostname: str, public_ip: Optional[str]) ->
             dns_latency_ms=dns_capability["latency_ms"]
         )
 
-        print(f"  [HOST] Stored: {org} | ASN {asn} | {country} | "
+        print(f"   [HOST] Stored: {org} | ASN {asn} | {country} | "
               f"DNS: {'Yes' if dns_capability['is_dns_server'] else 'No'}")
 
     except Exception as e:
@@ -321,7 +328,6 @@ def record_localhost_identity(system_hostname: str, public_ip: Optional[str]) ->
             except Exception:
                 pass
 
-
 def run_analysis_cycle(dns_servers: List[str], delay: float) -> None:
     """
     Run one complete analysis cycle (single run).
@@ -332,6 +338,14 @@ def run_analysis_cycle(dns_servers: List[str], delay: float) -> None:
     system_dns_servers = get_system_dns_servers()
     dhcp_servers = get_dhcp_server_ips()
     isp_related_servers = system_dns_servers | dhcp_servers
+
+    # FILTER OUT EXCLUDED IPs from the server list
+    original_count = len(dns_servers)
+    dns_servers = [ip for ip in dns_servers if ip not in EXCLUDED_IPS]
+    excluded_count = original_count - len(dns_servers)
+    
+    if excluded_count > 0:
+        print(f"\n🚫 Excluded {excluded_count} IP(s) from analysis: {', '.join(EXCLUDED_IPS)}\n")
 
     # Record local host identity
     record_localhost_identity(system_hostname, public_ip)
@@ -348,13 +362,14 @@ def run_analysis_cycle(dns_servers: List[str], delay: float) -> None:
     # WHOIS cache stats (from analysis results - for info only)
     whois_stats_before = get_whois_cache_stats()
     print("\n📊 WHOIS Cache Stats (from analysis results):")
-    print(f"  Total IPs in results table: {whois_stats_before['total_ips']}")
-    print(f"  Cached: {whois_stats_before['cached_ips']}")
-    print(f"  Missing: {whois_stats_before['missing_ips']}")
+    print(f"   Total IPs in results table: {whois_stats_before['total_ips']}")
+    print(f"   Cached: {whois_stats_before['cached_ips']}")
+    print(f"   Missing: {whois_stats_before['missing_ips']}")
 
     # ALWAYS check dns_servers list for missing WHOIS (not based on stats above)
     print(f"\n🔍 WHOIS data for {len(dns_servers)} DNS servers...")
     enriched_count = enrich_whois_data_for_servers(dns_servers, max_lookups=100)
+
     if enriched_count > 0:
         print(f"✅ Successfully enriched {enriched_count} IPs with WHOIS data\n")
 
@@ -398,7 +413,6 @@ def run_analysis_cycle(dns_servers: List[str], delay: float) -> None:
         f"Failed: {failed} | Time: {elapsed_time:.2f}s"
     )
     print(f"{'=' * 80}\n")
-
 
 def load_all_dns_servers(input_file: str) -> List[str]:
     """Load DNS servers from file and prepend system/DHCP DNS servers."""

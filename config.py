@@ -25,3 +25,5 @@ INPUT_FILE = os.getenv("INPUT_FILE", "test.json")
 LOOP_INTERVAL = 3600  # 1 hour
 DEFAULT_DELAY = 0.1
 DEFAULT_BATCH_SIZE = 100
+
+
