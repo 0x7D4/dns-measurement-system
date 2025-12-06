@@ -32,7 +32,7 @@ if [ ! -f ".env" ]; then
 fi
 
 set -a
-source "$SCRIPT_DIR/.env"
+. "$SCRIPT_DIR/.env"
 set +a
 
 # Setup Python environment
@@ -50,10 +50,6 @@ if [ ! -f "test.json" ]; then
     echo "ERROR: test.json not found" | tee -a "$LOG_FILE"
     exit 1
 fi
-
-# Run analyzer in background with nohup (first run only)
-nohup ./venv/bin/python3 main.py --delay 0 >> "$LOG_FILE" 2>&1 &
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS Analyzer process started (PID: $!)" | tee -a "$LOG_FILE"
 
 # Setup systemd (first run only)
 if [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
