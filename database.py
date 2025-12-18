@@ -43,6 +43,8 @@ class PostgreSQLDatabase:
                 dnssec_enabled BOOLEAN,
                 ad_flag_set BOOLEAN,
                 dnssec_rcode TEXT,
+                dnssec_strict BOOLEAN,
+                dnssec_strict_rcode TEXT,
                 malicious_blocking BOOLEAN,
                 malicious_rcode TEXT,
                 is_isp_assigned BOOLEAN DEFAULT FALSE,
@@ -138,10 +140,11 @@ class PostgreSQLDatabase:
             is_recursive, ra_flag_set, latency_ms,
             organization, asn, asn_description, country,
             dnssec_enabled, ad_flag_set, dnssec_rcode,
+            dnssec_strict, dnssec_strict_rcode,
             malicious_blocking, malicious_rcode,
             is_isp_assigned, server_responsive, test_reliability, failure_reason
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         self.cursor.execute(query, (
             result.server_ip,
@@ -158,6 +161,8 @@ class PostgreSQLDatabase:
             result.dnssec_enabled,
             result.ad_flag_set,
             result.dnssec_rcode,
+            result.dnssec_strict,
+            result.dnssec_strict_rcode,
             result.malicious_blocking,
             result.malicious_rcode,
             result.is_isp_assigned,

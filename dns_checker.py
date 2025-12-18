@@ -18,6 +18,7 @@ from config import (
     RECURSION_TEST_DOMAIN,
     LATENCY_TEST_DOMAIN,
     DNSSEC_TEST_DOMAIN,
+    DNSSEC_BROKEN_TEST_DOMAIN,  # RFC 8027 Section 3.1.12
     MALICIOUS_TEST_DOMAIN,
     TRACEROUTE_TEST_DOMAIN,  # now unused but kept for compatibility
     CACHE_TTL_TEST_DOMAIN,
@@ -349,6 +350,69 @@ class DNSChecker:
             print("    result: ERROR (exception during DNSSEC check)")
             return False, False, "ERROR", None
 
+    def check_dnssec_permissive(self) -> Tuple[bool, str, Optional[float]]:
+        """
+        RFC 8027 Section 3.1.12 - Permissive DNSSEC Test.
+        
+        Tests whether a validating resolver correctly rejects broken DNSSEC.
+        Queries a domain with intentionally broken DNSSEC signatures.
+        
+        Returns: (is_strict, rcode, rtt_ms)
+          - is_strict=True: Resolver correctly returned SERVFAIL (good - rejects bad DNSSEC)
+          - is_strict=False: Resolver permissively returned data (bad - accepts broken DNSSEC)
+        """
+        print(
+            f"  [STEP] DNSSEC Permissive check for {self.server_ip} "
+            f"(domain={DNSSEC_BROKEN_TEST_DOMAIN})"
+        )
+        try:
+            query, response, rtt = self._udp_query(
+                DNSSEC_BROKEN_TEST_DOMAIN,
+                dns.rdatatype.A,
+                want_dnssec=True,
+                set_rd=True,
+            )
+            rcode = dns.rcode.to_text(response.rcode())
+            # Success (strict): SERVFAIL means resolver rejected the bad signature
+            # Failure (permissive): NOERROR means resolver accepted broken DNSSEC
+            is_strict = response.rcode() == dns.rcode.SERVFAIL
+            self.log_query(
+                "A",
+                DNSSEC_BROKEN_TEST_DOMAIN,
+                "dnssec_permissive",
+                response,
+                rtt,
+                query_flags="DO",
+            )
+            print(
+                f"    result: is_strict={is_strict}, rcode={rcode}, "
+                f"rtt_ms={rtt:.3f}"
+            )
+            return is_strict, rcode, rtt
+
+        except dns.exception.Timeout:
+            self.log_query(
+                "A",
+                DNSSEC_BROKEN_TEST_DOMAIN,
+                "dnssec_permissive",
+                None,
+                DNS_TIMEOUT * 1000,
+                query_flags="DO",
+            )
+            print("    result: TIMEOUT")
+            return False, "TIMEOUT", None
+        except Exception:
+            self.log_query(
+                "A",
+                DNSSEC_BROKEN_TEST_DOMAIN,
+                "dnssec_permissive",
+                None,
+                None,
+                query_flags="DO",
+            )
+            print("    result: ERROR (exception during permissive DNSSEC check)")
+            return False, "ERROR", None
+
     def check_malicious_blocking(self) -> Tuple[bool, str, Optional[float]]:
         """Check if server blocks malicious domains."""
         print(
@@ -636,6 +700,9 @@ class DNSChecker:
         # 4) DNSSEC (run but mark as unreliable if server is down)
         dnssec_enabled_raw, ad_flag_set, dnssec_rcode, _ = self.check_dnssec()
 
+        # 4b) RFC 8027 Section 3.1.12 - Permissive DNSSEC check
+        dnssec_strict_raw, dnssec_strict_rcode, _ = self.check_dnssec_permissive()
+
         # 5) Malicious blocking (run but interpret based on server health)
         malicious_blocking_raw, malicious_rcode, _ = self.check_malicious_blocking()
 
@@ -653,9 +720,15 @@ class DNSChecker:
         # Smart interpretation: If server is not responsive, set blocking/DNSSEC to None
         if not server_responsive:
             dnssec_enabled = None
+            dnssec_strict = None
             malicious_blocking = None
         else:
             dnssec_enabled = dnssec_enabled_raw
+            # RFC 8027 Section 3.1.12: Only meaningful if resolver supports DNSSEC (AD bit)
+            if dnssec_enabled:
+                dnssec_strict = dnssec_strict_raw
+            else:
+                dnssec_strict = None  # Not applicable for non-validating resolvers
             if malicious_rcode in ["REFUSED", "SERVFAIL", "TIMEOUT"]:
                 malicious_blocking = None  # Cannot determine reliably
             else:
@@ -670,6 +743,7 @@ class DNSChecker:
             f"recursive={is_recursive}, "
             f"latency_ms={summary_latency}, "
             f"dnssec_enabled={dnssec_enabled}, "
+            f"dnssec_strict={dnssec_strict}, "
             f"blocks_malicious={malicious_blocking}, "
             f"traceroute_status={traceroute_status}, "
             f"cache_ttl_isc_org={cache_ttl_str}, "
@@ -693,6 +767,8 @@ class DNSChecker:
             dnssec_enabled=dnssec_enabled,
             ad_flag_set=ad_flag_set,
             dnssec_rcode=dnssec_rcode,
+            dnssec_strict=dnssec_strict,
+            dnssec_strict_rcode=dnssec_strict_rcode,
             malicious_blocking=malicious_blocking,
             malicious_rcode=malicious_rcode,
             is_isp_assigned=is_isp_assigned,

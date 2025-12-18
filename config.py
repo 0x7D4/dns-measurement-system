@@ -16,6 +16,9 @@ DNS_TIMEOUT = 5
 RECURSION_TEST_DOMAIN = "google.com"
 LATENCY_TEST_DOMAIN = "google.com"
 DNSSEC_TEST_DOMAIN = "iifon.org"
+# RFC 8027 Section 3.1.12 - Broken DNSSEC domain for testing permissive resolvers
+# RIPE NCC's test zone with intentional signature failure - strict resolvers return SERVFAIL
+DNSSEC_BROKEN_TEST_DOMAIN = "sigfail.go.dnscheck.ripe.net"
 MALICIOUS_TEST_DOMAIN = "008k.com"
 TRACEROUTE_TEST_DOMAIN = "ietf.org"     # used by traceroute test
 CACHE_TTL_TEST_DOMAIN = "isc.org"       # used by DNS cache TTL/invalidation test

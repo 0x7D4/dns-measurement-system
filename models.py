@@ -53,6 +53,12 @@ class ServerResult:
     dnssec_enabled: Optional[bool]
     ad_flag_set: bool
     dnssec_rcode: str
+    # RFC 8027 Section 3.1.12 - Permissive DNSSEC check
+    # True = resolver correctly rejects broken DNSSEC with SERVFAIL (strict/good)
+    # False = resolver permissively accepts broken DNSSEC (bad)
+    # None = could not determine (server unresponsive)
+    dnssec_strict: Optional[bool] = None
+    dnssec_strict_rcode: Optional[str] = None
     
     # Malicious blocking
     malicious_blocking: Optional[bool]
