@@ -1,7 +1,7 @@
 import argparse
 import sys
 from datetime import datetime
-from config import INPUT_FILE, DEFAULT_DELAY, LOOP_INTERVAL
+from config import INPUT_FILE, DEFAULT_DELAY
 
 
 def get_utc_timestamp() -> str:
@@ -55,19 +55,6 @@ def parse_args():
         type=float,
         default=DEFAULT_DELAY,
         help=f"Delay between server tests in seconds (default: {DEFAULT_DELAY})",
-    )
-
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="Run analysis once and exit (default: continuous with timer)",
-    )
-
-    parser.add_argument(
-        "--interval",
-        type=int,
-        default=LOOP_INTERVAL,
-        help=f"Interval between analysis cycles in seconds (default: {LOOP_INTERVAL})",
     )
 
     return parser.parse_args()

@@ -25,7 +25,6 @@ CACHE_TTL_TEST_DOMAIN = "isc.org"       # used by DNS cache TTL/invalidation tes
 
 # Input and scheduling
 INPUT_FILE = os.getenv("INPUT_FILE", "test.json")
-LOOP_INTERVAL = 3600  # 1 hour
 DEFAULT_DELAY = 0.1
 DEFAULT_BATCH_SIZE = 100
 
